@@ -22,7 +22,7 @@ long_test_length=320
 # - use 1 only if long_test_length >= 3600
 safety_vid_delta=2
 
-debug=1
+debug=0
 
 #####################################
 
@@ -263,8 +263,7 @@ for (( f=0; f<nb_freqs; f++ )); do
 			sleep 1
 			echo -n "."
 			grep FATAL $mp_log &>/dev/null
-			#if (( $? == 0 )); then
-			if (( cur_vid == 18 )); then	# TEST TO REMOVE #############################
+			if (( $? == 0 )); then
 				echo ""
 				echo "Hardware failure detected."
 				((cur_vid++))
