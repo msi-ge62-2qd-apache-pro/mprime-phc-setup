@@ -24,6 +24,12 @@ safety_vid_delta=2
 
 debug=0
 
+# Tolerance for inaccurate frequencies during the test (in percent)
+# Added because of https://bbs.archlinux.org/viewtopic.php?pid=1301126#p1301126
+# NOTE: actually it seems that the problem is different: some CPUs have a bogus 1st
+#       frequency that is 1 MHz higher than the real top frequency (the 2nd one).
+wrong_freq_tolerance=0
+
 #####################################
 
 # Check that settings are sane
@@ -234,6 +240,17 @@ for (( f=0; f<nb_freqs; f++ )); do
 	echo "Testing frequency $f (${freq[f]})…"
 	echo "Default vid: ${vid[f]}"
 
+	# Based on comments found on this page:
+	# http://openmindedbrain.info/09/05/2010/undervolting-in-ubuntu-10-04-lucid-lts/
+	# it appears that some processors have a bogus 1st frequency that will always go
+	# down to VID 0 and is in fact unused.
+
+	if (( f == 0 && ${freq[0]} == ${freq[1]} + 1000 )); then
+		echo "Looks like the first frequency is bogus; ignoring it."
+		final_vids="${vid[0]} "
+		continue
+	fi
+
 	# Pass 1: lowering vid quickly until there is an error
 
 	if (( cur_vid > ${vid[f]} )); then
@@ -271,7 +288,8 @@ for (( f=0; f<nb_freqs; f++ )); do
 				break 2
 			fi
 			cur_freq=$(cat $cpuf/scaling_cur_freq)
-			if (( ${cur_freq} != ${freq[f]} )); then
+			if (( (cur_freq < ${freq[f]} * (100 - wrong_freq_tolerance) / 100)
+				|| (cur_freq > ${freq[f]} * (100 + wrong_freq_tolerance) / 100) )); then
 				echo ""
 				echo "ERROR: Wrong frequency! (${cur_freq} instead of ${freq[f]})"
 				debug_info
@@ -334,9 +352,18 @@ echo "All done."
 echo "Default vids: $(cat $cpuf/phc_default_vids)"
 echo "Final vids:   $final_vids"
 echo ""
-if [[ -e /etc/conf.d/phc-intel ]]; then
-	echo "Edit /etc/conf.d/phc-intel to add your final vids,"
-	echo "then you can start the phc service."
+if [[ -e /etc/default/phc-intel ]]; then
+	# Newest version of the AUR phc-intel package
+	echo "Edit /etc/default/phc-intel to add your final vids."
+elif [[ -e /etc/phc-intel.conf ]]; then
+	# Old version of the AUR phc-intel package
+	echo "Edit /etc/phc-intel.conf to add your final vids."
+elif [[ -e /etc/conf.d/phc-intel ]]; then
+	# Old version of the AUR phc-intel package, or current dkms-phc-intel package.
+	echo "Edit /etc/conf.d/phc-intel to add your final vids."
+elif [[ -e /etc/default/phc-k8 ]]; then
+	# Newest version of the AUR phc-k8 package
+	echo "Edit /etc/default/phc-k8 to add your final vids."
 else
 	echo "If your system has a working rc.local (probably not the case with systemd), you can add the following 3 lines to /etc/rc.local, before the final \"exit 0\":"
 	echo ""
