@@ -155,7 +155,7 @@ trap cleanup EXIT
 
 # List all vids and frequencies
 freqs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies)
-vids=$(cat /sys/devices/system/cpu/cpu0/cpufreq/phc_default_vids)
+default_vids=$(cat /sys/devices/system/cpu/cpu0/cpufreq/phc_default_vids)
 
 nb_freqs=0
 for f in $freqs; do
@@ -165,7 +165,7 @@ for f in $freqs; do
 done
 
 nb_vids=0
-for v in $vids; do
+for v in $default_vids; do
 	#echo $nb_vids - $v
 	vid[nb_vids]=$v
 	((nb_vids++))
@@ -242,6 +242,9 @@ function set_vid
 # Save progress in order to be able to continue after a crash
 function save_state
 {
+	# Restore default vids before writing to disk to avoid a possible crash
+	set_sys_val phc_vids "$default_vids"
+
 	# state file contains:
 	# - current frequency between 0 and nb_freqs - 1
 	# - current VID
@@ -271,7 +274,7 @@ if [[ -e "$crash_state" ]]; then
 	echo "Frequency: $f"
 	echo "Current VID: $cur_vid"
 	echo "Current best vids: $final_vids"
-	echo "Press return to continue from this point after a crash, or ctrl-c to delete the state file."
+	echo "Press return to continue from this point after a crash, or CTRL-C to delete the state file."
 	read
 
 	# There was a crash at $cur_vid, so increase it and go directly to pass 2
@@ -403,7 +406,7 @@ done
 
 echo ""
 echo "All done."
-echo "Default vids: $(cat $cpuf/phc_default_vids)"
+echo "Default vids: $default_vids"
 echo "Final vids:   $final_vids"
 echo ""
 if [[ -e /etc/default/phc-intel ]]; then
