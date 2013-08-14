@@ -107,6 +107,9 @@ backup_phc_vids=$(cat $cpuf/phc_vids)
 	set_sys_val scaling_governor userspace
 #fi
 
+# File to save the state in order to continue after a crash
+crash_state="/var/tmp/$(basename $0).state"
+
 # Log file for mprime
 mp_log=/tmp/$(basename $0).mp
 
@@ -142,6 +145,9 @@ function cleanup
 
 	# Delete log
 	[[ -e $mp_log ]] && rm $mp_log
+
+	# Delete state file
+	[[ -e "$crash_state" ]] && rm "$crash_state"
 }
 
 # Restore original state whenever the script exits
@@ -233,9 +239,51 @@ function set_vid
 	set_sys_val phc_vids "$v"
 }
 
-cur_vid=${vid[0]}
+# Save progress in order to be able to continue after a crash
+function save_state
+{
+	# state file contains:
+	# - current frequency between 0 and nb_freqs - 1
+	# - current VID
+	# - current list of best VIDS found
+	echo $f >"$crash_state"
+	echo $cur_vid >>"$crash_state"
+	echo "$final_vids" >>"$crash_state"
+	sync
+	sleep 1
+}
 
-for (( f=0; f<nb_freqs; f++ )); do
+function read_state
+{
+	f=$(head -1 "$crash_state")
+	cur_vid=$(sed -n 2p "$crash_state")
+	final_vids="$(tail -1 "$crash_state")"
+	#echo f=$f
+	#echo cur_vid=$cur_vid
+	#echo final_vids="-"$final_vids"-"
+}
+
+# Check if state file exists, which probably means the computer crashed
+if [[ -e "$crash_state" ]]; then
+	read_state
+	echo
+	echo "State file $crash_state detected."
+	echo "Frequency: $f"
+	echo "Current VID: $cur_vid"
+	echo "Current best vids: $final_vids"
+	echo "Press return to continue from this point after a crash, or ctrl-c to delete the state file."
+	read
+
+	# There was a crash at $cur_vid, so increase it and go directly to pass 2
+	cur_vid=$((cur_vid+2))
+	pass2=1
+else
+	cur_vid=${vid[0]}
+	f=0
+	pass2=0
+fi
+
+for (( ; f<nb_freqs; f++ )); do
 	echo ""
 	echo "Testing frequency $f (${freq[f]})..."
 	echo "Default vid: ${vid[f]}"
@@ -253,16 +301,18 @@ for (( f=0; f<nb_freqs; f++ )); do
 
 	# Pass 1: lowering vid quickly until there is an error
 
-	if (( cur_vid > ${vid[f]} )); then
+	if (( cur_vid > ${vid[f]} && pass2 == 0 )); then
+		#echo "forcing cur vid to max"
 		cur_vid=${vid[f]}
 	fi
 
 	((cur_vid--))
 
-	for (( ; cur_vid > 0; cur_vid-- )); do
+	for (( ; cur_vid > 0 && pass2 == 0; cur_vid-- )); do
 		count=$short_test_length
 
 		echo "Trying vid $cur_vid for $count seconds"
+		save_state
 
 		set_vid $f $cur_vid
 
@@ -281,10 +331,10 @@ for (( f=0; f<nb_freqs; f++ )); do
 			echo -n "."
 			grep FATAL $mp_log &>/dev/null
 			if (( $? == 0 )); then
+				kill_mprime
 				echo ""
 				echo "Hardware failure detected."
 				((cur_vid++))
-				kill_mprime
 				break 2
 			fi
 			cur_freq=$(cat $cpuf/scaling_cur_freq)
@@ -307,6 +357,7 @@ for (( f=0; f<nb_freqs; f++ )); do
 	for (( ; cur_vid >= 0 && cur_vid < ${vid[f]}-safety_vid_delta; cur_vid++ )); do
 		count=$long_test_length
 		echo "Trying vid $cur_vid for $count seconds"
+		save_state
 
 		set_vid $f $cur_vid
 		set_sys_val scaling_setspeed ${freq[f]}
@@ -336,14 +387,17 @@ for (( f=0; f<nb_freqs; f++ )); do
 	done
 
 	echo ""
-	echo "Found correct vid. Adding $safety_vid_delta for safety."
+	echo "Found working vid. Adding $safety_vid_delta for safety."
 	(( cur_vid < 0 )) && cur_vid=0
 	if (( cur_vid + safety_vid_delta > ${vid[f]} )); then
-		cur_vid=$((${vid[f]}-safety_vid_delta))
+		final_vids=${final_vids}${vid[f]}
+	else
+		final_vids=${final_vids}$((cur_vid+safety_vid_delta))
 	fi
-	final_vids=$final_vids$((cur_vid+safety_vid_delta))
 	(( f < nb_freqs-1 )) && final_vids="$final_vids "
 	echo "Current results: $final_vids"
+
+	pass2=0
 
 done
 
