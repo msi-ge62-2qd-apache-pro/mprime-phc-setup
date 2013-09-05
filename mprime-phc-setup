@@ -322,7 +322,7 @@ for (( ; f<nb_freqs; f++ )); do
 
 	cur_vid=$((cur_vid+vid_delta))
 
-	for (( ; cur_vid != vid_limit && pass2 == 0; cur_vid+=vid_delta )); do
+	for (( ; cur_vid*vid_delta < vid_limit*vid_delta && pass2 == 0; cur_vid+=vid_delta )); do
 		count=$short_test_length
 
 		echo "Trying vid $cur_vid for $count seconds"
